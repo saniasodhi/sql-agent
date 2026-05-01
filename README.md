@@ -27,4 +27,6 @@ cp .env.example .env  # then add your API key
 ## Progress
 - [x] Day 1: Dev environment
 - [x] Day 2: Project scaffolding
-- [ ] Day 3: First LLM call
+- [x] Day 3: First LLM call
+- [x] Day 4: Database setup & SQL practice
+- [ ] Day 5: Connect Python to SQLite
