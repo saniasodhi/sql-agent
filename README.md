@@ -5,7 +5,8 @@
 - [x] Day 4: Database setup & SQL practice
 - [x] Day 5: Python ↔ SQLite + schema extractor
 - [x] Day 6: MVP — text_to_sql + nl_query end-to-end
-- [ ] Day 7: First eval harness — measure how often it works
+- [x] Day 7: First eval harness — 70% baseline accuracy
+- [ ] Day 8: Failure analysis + retry loop
 
 ## Example
 
@@ -19,3 +20,13 @@ print(result["sql"])
 print(result["results"])
 # [{'FirstName': 'Helena', 'LastName': 'Holý', 'total_spent': 49.62}, ...]
 ```
+
+## Results
+
+Current execution accuracy on the internal golden dataset (10 questions on the Chinook database):
+
+| Strategy                    | Model     | Accuracy | Avg Latency |
+| --------------------------- | --------- | -------- | ----------- |
+| Single-shot + schema prompt | Haiku 4.5 | XX.X%    | X.XXs       |
+
+See [BASELINE.md](BASELINE.md) for the full progression.
