@@ -1,24 +1,35 @@
 """
 The SQL-Agent core.
 
-Today (Day 6) this is a single-shot text-to-SQL function:
-  question + schema -> SQL string -> execution -> results.
+Day 8 update: now with a retry loop.
 
-Later (Day 8+) we'll add a retry loop, schema retrieval, and self-correction.
+Pipeline:
+  1. Generate SQL from question + schema.
+  2. Try to execute it.
+  3. If it fails, tell the model what broke and ask it to fix.
+  4. Repeat up to MAX_ATTEMPTS times.
+
+This is the simplest possible "agent loop": act -> observe -> retry.
 """
 
 import re
-from src.llm import ask_claude
+import sqlite3
+from anthropic import Anthropic
+from dotenv import load_dotenv
+
 from src.db import get_schema, run_query
 
+# Load env vars and create one shared Claude client.
+load_dotenv()
+_client = Anthropic()
 
-# The system prompt is the single most important piece of this whole project.
-# Every word has been chosen carefully:
-#   - Tells the model exactly what to output (SQL only)
-#   - Tells it the dialect (SQLite, not Postgres / MySQL — those have different syntax)
-#   - Forbids markdown fences (the #1 cause of broken outputs)
-#   - Forbids explanations (the #2 cause)
-#   - Provides the schema so the model knows what tables/columns exist
+# How many tries before we give up.
+MAX_ATTEMPTS = 3
+
+# Default model. Haiku is cheap and good enough for most queries.
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
+
 SQL_SYSTEM_PROMPT_TEMPLATE = """You are an expert SQLite SQL writer.
 
 You will be given a question about a database and the database schema. Your job is to return a single SQLite SQL query that answers the question.
@@ -36,102 +47,151 @@ DATABASE SCHEMA:
 
 
 def _clean_sql(raw: str) -> str:
-    """
-    Strip common LLM artifacts from a SQL response.
-    Even with a good system prompt, models sometimes wrap output in markdown.
-    Belt-and-suspenders: tell the model not to do it AND clean it up if it does.
-    """
+    """Strip markdown fences and whitespace from a SQL response."""
     s = raw.strip()
-
-    # Remove ```sql ... ``` or ``` ... ``` fences if present.
-    # The (?s) flag makes . match newlines.
     fence_pattern = r"^```(?:sql)?\s*(.*?)\s*```$"
     match = re.match(fence_pattern, s, flags=re.DOTALL | re.IGNORECASE)
     if match:
         s = match.group(1).strip()
-
     return s
 
 
-def text_to_sql(question: str, schema: str | None = None) -> str:
+def _call_claude(messages: list[dict], system_prompt: str, model: str) -> str:
     """
-    Convert a natural language question to a SQLite SQL query.
+    Thin wrapper around the Anthropic client.
+    Note: we pass `messages` (a list) instead of a single question, because
+    on retries we need to send the conversation history (previous SQL + error).
+    """
+    response = _client.messages.create(
+        model=model,
+        max_tokens=1024,
+        system=system_prompt,
+        messages=messages,
+    )
+    return response.content[0].text
 
-    Args:
-        question: The user's question in plain English.
-        schema: The database schema as a string. If None, fetches the default
-                Chinook schema via get_schema().
 
-    Returns:
-        A SQL query string. May be the literal string "-- UNANSWERABLE"
-        if the model decided the question can't be answered.
+def text_to_sql(
+    question: str,
+    schema: str | None = None,
+    model: str = DEFAULT_MODEL,
+    max_attempts: int = MAX_ATTEMPTS,
+    verbose: bool = False,
+) -> dict:
+    """
+    Convert a natural language question into an executed SQL query, with retries.
+
+    Returns a dict with:
+      - "sql": the final SQL query string (or "-- UNANSWERABLE")
+      - "results": the rows returned by the query, or None if all attempts failed
+      - "error": the last error message, or None on success
+      - "attempts": how many tries it took (1, 2, or 3)
+      - "trace": a list of {sql, error} pairs for each attempt (for debugging)
     """
     if schema is None:
         schema = get_schema()
 
     system_prompt = SQL_SYSTEM_PROMPT_TEMPLATE.format(schema=schema)
-    raw = ask_claude(question, system_prompt=system_prompt)
-    return _clean_sql(raw)
+
+    # We build up the conversation as we go.
+    # Start with just the user's question.
+    messages = [{"role": "user", "content": question}]
+
+    trace = []
+
+    for attempt in range(1, max_attempts + 1):
+        # 1. Get SQL from the model.
+        raw = _call_claude(messages, system_prompt, model)
+        sql = _clean_sql(raw)
+
+        if verbose:
+            print(f"  Attempt {attempt}: {sql[:80]}...")
+
+        # 2. Handle the explicit "I can't answer" sentinel.
+        if sql.strip().startswith("-- UNANSWERABLE"):
+            return {
+                "sql": sql,
+                "results": None,
+                "error": "Model marked the question as unanswerable.",
+                "attempts": attempt,
+                "trace": trace + [{"sql": sql, "error": "unanswerable"}],
+            }
+
+        # 3. Try to execute it.
+        try:
+            results = run_query(sql)
+            # Success! Return immediately.
+            return {
+                "sql": sql,
+                "results": results,
+                "error": None,
+                "attempts": attempt,
+                "trace": trace + [{"sql": sql, "error": None}],
+            }
+        except sqlite3.Error as e:
+            error_msg = str(e)
+            trace.append({"sql": sql, "error": error_msg})
+
+            if verbose:
+                print(f"    -> failed: {error_msg}")
+
+            # 4. If we have attempts left, append a retry message.
+            #    The model now sees: original question, its broken SQL, and the error.
+            if attempt < max_attempts:
+                # First, add the model's broken response to the conversation
+                # so the next call sees what was tried.
+                messages.append({"role": "assistant", "content": sql})
+                # Then add a user message describing the error and asking for a fix.
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"That query failed with this error:\n\n{error_msg}\n\n"
+                        "Please fix the query and return ONLY the corrected SQL — "
+                        "no explanations, no markdown."
+                    ),
+                })
+
+    # 5. All attempts exhausted.
+    last = trace[-1] if trace else {"sql": None, "error": "no attempts made"}
+    return {
+        "sql": last["sql"],
+        "results": None,
+        "error": f"Failed after {max_attempts} attempts. Last error: {last['error']}",
+        "attempts": max_attempts,
+        "trace": trace,
+    }
 
 
-def nl_query(question: str) -> dict:
+def nl_query(question: str, **kwargs) -> dict:
     """
-    End-to-end: take a natural language question, generate SQL, execute it,
-    and return both the SQL and the results.
-
-    Args:
-        question: The user's question in plain English.
-
-    Returns:
-        A dict with keys:
-          - "question": the original question
-          - "sql": the generated SQL
-          - "results": the rows returned by the query (or None if it failed)
-          - "error": error message if the query failed (or None on success)
+    Backwards-compatible wrapper. Returns the same shape as before plus extras.
+    Kept so existing callers (like the eval) keep working without changes.
     """
-    sql = text_to_sql(question)
-
-    if sql.strip().startswith("-- UNANSWERABLE"):
-        return {
-            "question": question,
-            "sql": sql,
-            "results": None,
-            "error": "Model marked the question as unanswerable.",
-        }
-
-    try:
-        results = run_query(sql)
-        return {
-            "question": question,
-            "sql": sql,
-            "results": results,
-            "error": None,
-        }
-    except Exception as e:
-        return {
-            "question": question,
-            "sql": sql,
-            "results": None,
-            "error": str(e),
-        }
+    result = text_to_sql(question, **kwargs)
+    return {
+        "question": question,
+        "sql": result["sql"],
+        "results": result["results"],
+        "error": result["error"],
+        "attempts": result["attempts"],
+        "trace": result["trace"],
+    }
 
 
 if __name__ == "__main__":
-    # Quick manual test on a few questions.
+    # Quick manual test with verbose output so you can watch the loop.
     questions = [
         "Which 3 customers spent the most money?",
-        "How many tracks are there per genre? Give me the top 5.",
         "What is the longest track in the database?",
-        "Who is the President of France?",  # unanswerable from this DB
+        # An intentionally fuzzy question to see if retries help:
+        "How much money did we make from German invoices?",
     ]
 
     for q in questions:
         print(f"\n=== {q} ===")
-        result = nl_query(q)
-        print(f"SQL: {result['sql']}")
+        result = nl_query(q, verbose=True)
+        print(f"Final SQL ({result['attempts']} attempt(s)): {result['sql']}")
         if result["error"]:
             print(f"ERROR: {result['error']}")
         else:
-            print(f"Results ({len(result['results'])} rows):")
-            for row in result["results"][:5]:  # show at most 5 rows
-                print(f"  {row}")
+            print(f"Results ({len(result['results'])} rows): {result['results'][:3]}")
