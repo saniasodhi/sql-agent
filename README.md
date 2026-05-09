@@ -6,8 +6,8 @@
 - [x] Day 5: Python ↔ SQLite + schema extractor
 - [x] Day 6: MVP — text_to_sql + nl_query end-to-end
 - [x] Day 7: First eval harness — 70% baseline accuracy
-- [x] Day 8: Retry loop on execution errors → YY%
-- [ ] Day 9: Few-shot examples in the prompt    
+- [x] Day 9: Few-shot examples in prompt → ZZ%
+- [ ] Day 10: Expand the golden dataset to 25-30 questions 
 
 ## Example
 
@@ -30,5 +30,6 @@ Execution accuracy on the internal golden dataset (10 questions on the Chinook d
 | ------------------------------------- | --------- | -------- | ----------- |
 | Single-shot + schema                  | Haiku 4.5 | 70%    | 1.31s       |
 | + Retry loop on errors (max 3 tries)  | Haiku 4.5 | 80%    | 1.76s       |
+| + Few-shot prompting (4 examples)     | Haiku 4.5 | 90%    | 1.01s       |
 
 See [BASELINE.md](BASELINE.md) for the full progression.

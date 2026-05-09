@@ -16,6 +16,7 @@ import re
 import sqlite3
 from anthropic import Anthropic
 from dotenv import load_dotenv
+from src.few_shot import format_few_shot_block
 
 from src.db import get_schema, run_query
 
@@ -43,6 +44,9 @@ STRICT OUTPUT RULES:
 
 DATABASE SCHEMA:
 {schema}
+
+{few_shot_block}
+Now answer the user's question. Return only SQL, nothing else.
 """
 
 
@@ -91,7 +95,10 @@ def text_to_sql(
     if schema is None:
         schema = get_schema()
 
-    system_prompt = SQL_SYSTEM_PROMPT_TEMPLATE.format(schema=schema)
+    system_prompt = SQL_SYSTEM_PROMPT_TEMPLATE.format(
+    schema=schema,
+    few_shot_block=format_few_shot_block(),
+    )
 
     # We build up the conversation as we go.
     # Start with just the user's question.
