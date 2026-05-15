@@ -6,8 +6,8 @@
 - [x] Day 5: Python ↔ SQLite + schema extractor
 - [x] Day 6: MVP — text_to_sql + nl_query end-to-end
 - [x] Day 7: First eval harness — 70% baseline accuracy
-- [x] Day 9: Few-shot examples in prompt → ZZ%
-- [ ] Day 10: Expand the golden dataset to 25-30 questions 
+- [x] Day 9: Few-shot examples in prompt → 90%
+- [x] Day 10: Expand the golden dataset to 30 questions 
 
 ## Example
 
