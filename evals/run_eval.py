@@ -1,9 +1,17 @@
 """
-Day 8: Eval harness, updated to use the retry-aware agent.
+eval harness for the sql-agent.
 
-Now also reports:
-  - average attempts per question (how often did retries kick in)
-  - retry success rate (of the failures-on-attempt-1, how many recovered)
+semantic result matching:
+- single-column gold: compare by value only (column name doesn't matter).
+  example: agent returns `invoice_count`, gold has `count`. same number, pass.
+- multi-column gold: match agent columns to gold columns by name
+  (case-insensitive). agent is allowed to return extra columns; we just project
+  to the ones gold asked for. example: gold wants {FirstName, LastName,
+  total_spent}, agent returns {CustomerId, FirstName, LastName, total_spent}
+  -> we drop CustomerId and compare the rest. pass.
+- row count must match; row order doesn't (unless the question is order-
+  sensitive, which we don't enforce yet — TODO).
+- floats are rounded to 4 decimals to avoid float-noise false negatives.
 """
 
 import time
@@ -12,13 +20,73 @@ from src.db import run_query
 from evals.golden_questions import GOLDEN_QUESTIONS
 
 
-def normalize_results(results) -> list[tuple]:
+def _as_rows_of_dicts(results):
     if results is None:
         return []
-    return sorted(tuple(row.values()) for row in results)
+    return [dict(row) for row in results]
 
 
-def evaluate_one(item: dict) -> dict:
+def _norm_val(v):
+    if v is None:
+        return "__NONE__"
+    if isinstance(v, float):
+        return f"{round(v, 4)}"
+    return str(v)
+
+
+def _results_match(agent_rows, gold_rows):
+    """
+    Returns (passed: bool, reason: str).
+    """
+    if len(agent_rows) != len(gold_rows):
+        return False, f"row count mismatch (agent {len(agent_rows)} vs gold {len(gold_rows)})"
+
+    if not gold_rows:
+        return True, "both empty"
+
+    gold_cols = list(gold_rows[0].keys())
+
+    # CASE 1: single-column gold. Ignore column names, compare values only.
+    if len(gold_cols) == 1:
+        agent_vals = []
+        for row in agent_rows:
+            vals = list(row.values())
+            if len(vals) != 1:
+                return False, f"single-column gold but agent returned {len(vals)} columns"
+            agent_vals.append(_norm_val(vals[0]))
+        gold_vals = [_norm_val(list(r.values())[0]) for r in gold_rows]
+        if sorted(agent_vals) == sorted(gold_vals):
+            return True, "match (single-col, values-only)"
+        return False, "single-col values differ"
+
+    # CASE 2: multi-column gold. Project agent to gold's columns by name (case-insensitive).
+    def project(row):
+        row_keys_lower = {k.lower(): k for k in row.keys()}
+        out = []
+        for c in gold_cols:
+            if c.lower() not in row_keys_lower:
+                return None
+            actual_key = row_keys_lower[c.lower()]
+            out.append(_norm_val(row[actual_key]))
+        return tuple(out)
+
+    agent_tuples = []
+    for row in agent_rows:
+        p = project(row)
+        if p is None:
+            return False, f"agent missing gold column(s) by name: {gold_cols}"
+        agent_tuples.append(p)
+
+    gold_tuples = []
+    for row in gold_rows:
+        gold_tuples.append(tuple(_norm_val(row[c]) for c in gold_cols))
+
+    if sorted(agent_tuples) == sorted(gold_tuples):
+        return True, "match"
+    return False, "values differ"
+
+
+def evaluate_one(item):
     qid = item["id"]
     question = item["question"]
     gold_sql = item["gold_sql"]
@@ -31,7 +99,7 @@ def evaluate_one(item: dict) -> dict:
             "id": qid,
             "question": question,
             "passed": False,
-            "reason": f"Agent crashed: {e}",
+            "reason": f"agent crashed: {e}",
             "agent_sql": None,
             "attempts": 0,
             "latency_s": round(time.time() - t0, 2),
@@ -47,21 +115,24 @@ def evaluate_one(item: dict) -> dict:
             "id": qid,
             "question": question,
             "passed": False,
-            "reason": f"Agent gave up: {agent_out['error']}",
+            "reason": f"agent gave up: {agent_out['error']}",
             "agent_sql": agent_sql,
             "attempts": attempts,
             "latency_s": latency,
         }
 
-    # Run the gold SQL for comparison.
     gold_results = run_query(gold_sql)
+    agent_rows = _as_rows_of_dicts(agent_results)
+    gold_rows = _as_rows_of_dicts(gold_results)
 
-    if normalize_results(agent_results) == normalize_results(gold_results):
+    passed, reason = _results_match(agent_rows, gold_rows)
+
+    if passed:
         return {
             "id": qid,
             "question": question,
             "passed": True,
-            "reason": "Match",
+            "reason": reason,
             "agent_sql": agent_sql,
             "attempts": attempts,
             "latency_s": latency,
@@ -71,10 +142,7 @@ def evaluate_one(item: dict) -> dict:
             "id": qid,
             "question": question,
             "passed": False,
-            "reason": (
-                f"Result mismatch. Agent got {len(agent_results)} rows, "
-                f"gold got {len(gold_results)} rows."
-            ),
+            "reason": reason,
             "agent_sql": agent_sql,
             "attempts": attempts,
             "latency_s": latency,
@@ -84,20 +152,20 @@ def evaluate_one(item: dict) -> dict:
 
 
 def main():
-    print(f"Running eval on {len(GOLDEN_QUESTIONS)} questions...\n")
+    print(f"running eval on {len(GOLDEN_QUESTIONS)} questions...\n")
 
     results = []
     for item in GOLDEN_QUESTIONS:
         result = evaluate_one(item)
         results.append(result)
 
-        status = "✅" if result["passed"] else "❌"
-        print(f"{status} Q{result['id']}: {result['question']}")
-        print(f"   SQL: {result.get('agent_sql', '<crashed>')}")
+        status = "OK" if result["passed"] else "FAIL"
+        print(f"[{status}] Q{result['id']}: {result['question']}")
+        print(f"   sql: {result.get('agent_sql', '<crashed>')}")
         print(f"   {result['reason']}  ({result['latency_s']}s, {result['attempts']} attempt(s))")
         if not result["passed"] and "agent_results_preview" in result:
-            print(f"   Agent rows: {result['agent_results_preview']}")
-            print(f"   Gold  rows: {result['gold_results_preview']}")
+            print(f"   agent rows: {result['agent_results_preview']}")
+            print(f"   gold  rows: {result['gold_results_preview']}")
         print()
 
     total = len(results)
@@ -109,13 +177,13 @@ def main():
     recovered = sum(1 for r in results if r["passed"] and r["attempts"] > 1)
 
     print("=" * 60)
-    print(f"RESULTS: {passed}/{total} passed = {accuracy:.1f}% execution accuracy")
-    print(f"Average latency: {avg_latency:.2f}s per question")
-    print(f"Average attempts: {avg_attempts:.2f} per question")
-    print(f"Questions that needed a retry: {needed_retry}")
-    print(f"Questions that recovered via retry: {recovered}")
+    print(f"results: {passed}/{total} passed = {accuracy:.1f}% execution accuracy")
+    print(f"avg latency: {avg_latency:.2f}s")
+    print(f"avg attempts: {avg_attempts:.2f}")
+    print(f"questions that needed a retry: {needed_retry}")
+    print(f"questions that recovered via retry: {recovered}")
     print("=" * 60)
 
 
 if __name__ == "__main__":
-    main()
+    main()  
