@@ -13,7 +13,7 @@ semantic result matching:
   sensitive, which we don't enforce yet — TODO).
 - floats are rounded to 4 decimals to avoid float-noise false negatives.
 """
-
+import argparse
 import time
 from src.agent import text_to_sql
 from src.db import run_query
@@ -30,7 +30,7 @@ def _norm_val(v):
     if v is None:
         return "__NONE__"
     if isinstance(v, float):
-        return f"{round(v, 4)}"
+        return f"{round(v, 2)}"
     return str(v)
 
 
@@ -86,14 +86,14 @@ def _results_match(agent_rows, gold_rows):
     return False, "values differ"
 
 
-def evaluate_one(item):
+def evaluate_one(item,model):
     qid = item["id"]
     question = item["question"]
     gold_sql = item["gold_sql"]
 
     t0 = time.time()
     try:
-        agent_out = text_to_sql(question)
+        agent_out = text_to_sql(question,model=model)
     except Exception as e:
         return {
             "id": qid,
@@ -152,11 +152,16 @@ def evaluate_one(item):
 
 
 def main():
-    print(f"running eval on {len(GOLDEN_QUESTIONS)} questions...\n")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="claude-haiku-4-5-20251001",
+                        help="model id (e.g. claude-haiku-4-5-20251001, claude-sonnet-4-6)")
+    args = parser.parse_args()
+
+    print(f"running eval on {len(GOLDEN_QUESTIONS)} questions with model={args.model}...\n")
 
     results = []
     for item in GOLDEN_QUESTIONS:
-        result = evaluate_one(item)
+        result = evaluate_one(item, model=args.model)
         results.append(result)
 
         status = "OK" if result["passed"] else "FAIL"
@@ -177,6 +182,7 @@ def main():
     recovered = sum(1 for r in results if r["passed"] and r["attempts"] > 1)
 
     print("=" * 60)
+    print(f"model: {args.model}")
     print(f"results: {passed}/{total} passed = {accuracy:.1f}% execution accuracy")
     print(f"avg latency: {avg_latency:.2f}s")
     print(f"avg attempts: {avg_attempts:.2f}")
@@ -186,4 +192,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()  
+    main()

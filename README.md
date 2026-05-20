@@ -8,6 +8,7 @@
 - [x] Day 7: First eval harness — 70% baseline accuracy
 - [x] Day 9: Few-shot examples in prompt → 90%
 - [x] Day 10: Expand the golden dataset to 30 questions 
+- [x] Day 13: Comparing Haiku and Sonnet 
 
 ## Example
 
@@ -23,13 +24,25 @@ print(result["results"])
 ```
 
 ## Results
+## results
 
-Execution accuracy on the internal golden dataset (10 questions on the Chinook database):
+execution accuracy on the internal golden eval (30 questions, chinook db):
 
-| Strategy                              | Model     | Accuracy | Avg Latency |
-| ------------------------------------- | --------- | -------- | ----------- |
-| Single-shot + schema                  | Haiku 4.5 | 70%    | 1.31s       |
-| + Retry loop on errors (max 3 tries)  | Haiku 4.5 | 80%    | 1.76s       |
-| + Few-shot prompting (4 examples)     | Haiku 4.5 | 90%    | 1.01s       |
+| model       | strategy             | strict accuracy | verified* | avg latency |
+| ----------- | -------------------- | --------------- | --------- | ----------- |
+| haiku 4.5   | single-shot + schema | 70%             | —         | 2.3s        |
+| haiku 4.5   | + retry loop         | 80%             | —         | 2.5s        |
+| haiku 4.5   | + self-critique      | 93%             | —         | 2.5s        |
+| sonnet 4.6  | + self-critique      | 87%             | 30/30     | 5.2s        |
+
+*"verified" = manually checked the strict-match failures. sonnet's 4 misses are all
+correct answers formatted differently (combining FirstName+LastName into one column,
+or renaming `revenue`→`TotalRevenue`). the strict matcher penalizes the more
+human-friendly output. see NOTES.md.
+
+takeaway: a strict result matcher rewards literal column dumps over thoughtful
+formatting — the smarter model gets penalized for being smarter. real benchmarks
+(BIRD) report both strict and "soft" accuracy for exactly this reason. shipping
+haiku for cost/speed; sonnet is at least as correct.
 
 See [BASELINE.md](BASELINE.md) for the full progression.

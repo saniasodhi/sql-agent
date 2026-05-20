@@ -13,3 +13,8 @@ Each row is a snapshot — the date, the eval setup, and the score.
 
 - day 12: + self-critique step before executing. **93.3%**
   - latency roughly doubled (extra LLM call per question). critic revised ~28/30 drafts.
+
+- day 13: model comparison (haiku vs sonnet), rounding fix in matcher (4dp -> 2dp).
+  - haiku 4.5: **93% strict**
+  - sonnet 4.6: **87% strict, 30/30 verified** (4 misses are correct-but-differently-formatted)
+  - decision: ship haiku. cheaper, faster, and the literal output style matches the matcher. sonnet is at least as correct.
