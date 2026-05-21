@@ -45,4 +45,6 @@ formatting — the smarter model gets penalized for being smarter. real benchmar
 (BIRD) report both strict and "soft" accuracy for exactly this reason. shipping
 haiku for cost/speed; sonnet is at least as correct.
 
+By day 14, I built a text-to-SQL agent with self-correction, evaluated it against a 30-question benchmark with proper execution-accuracy matching, and improved it from 70% to 93% through retry loops, few-shot prompting, and self-critique — then compared models to make a cost-vs-quality decision.
+
 See [BASELINE.md](BASELINE.md) for the full progression.
