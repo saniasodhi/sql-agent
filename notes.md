@@ -25,3 +25,15 @@ so sonnet's *verified* accuracy is 30/30. it lost points for being more human-fr
 big lesson: a strict matcher punishes the smarter model. real benchmarks (BIRD) report both strict execution accuracy AND verified/soft accuracy for this reason. my matcher rewards literal column dumps over thoughtful formatting.
 
 decision: stick with haiku for the eval (cheaper, faster, and the matcher likes its literal style), but note that sonnet is at least as correct and arguably produces nicer output. would re-evaluate if i cared about output formatting for end users.
+
+## day 15: why schema retrieval
+
+problem: we dump the whole schema into every prompt. fine for chinook (11 tables, ~700 tokens) but breaks on real dbs (100s-1000s of tables):
+- doesn't fit in context
+- irrelevant tables confuse the model -> wrong table picks
+- pay for the whole schema on every call
+
+plan:
+- day 15 (today): made a fake 41-table schema (11 real + 30 decoys) to simulate the problem
+- day 16: build a retriever that picks the relevant tables for a question (start simple: keyword/embedding match)
+- day 17: wire retrieval into the agent, eval "retrieve relevant tables" vs "dump everything", compare accuracy + tokens
