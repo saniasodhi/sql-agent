@@ -37,3 +37,17 @@ plan:
 - day 15 (today): made a fake 41-table schema (11 real + 30 decoys) to simulate the problem
 - day 16: build a retriever that picks the relevant tables for a question (start simple: keyword/embedding match)
 - day 17: wire retrieval into the agent, eval "retrieve relevant tables" vs "dump everything", compare accuracy + tokens
+
+## day 16: embedding retriever
+
+built SchemaRetriever using sentence-transformers (all-MiniLM-L6-v2, local, free).
+embeds each table once, embeds the question, returns top-k by cosine similarity.
+
+works: correct tables land in top-5 for all test questions, even when the question
+doesn't mention the table by name (e.g. "money spent" -> Invoice).
+
+imperfect: some decoys sneak in (PaymentMethod for money questions). fine — recall
+matters more than precision here. as long as the right tables are in the candidate
+set, the LLM handles the rest.
+
+next (day 17): wire this into the agent, eval retrieval vs dump-everything.
