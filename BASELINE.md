@@ -18,3 +18,10 @@ Each row is a snapshot — the date, the eval setup, and the score.
   - haiku 4.5: **93% strict**
   - sonnet 4.6: **87% strict, 30/30 verified** (4 misses are correct-but-differently-formatted)
   - decision: ship haiku. cheaper, faster, and the literal output style matches the matcher. sonnet is at least as correct.
+
+  - day 17: schema retrieval (RAG) on a 41-table schema (11 real + 30 decoys).
+  - dump everything: 90.0% acc, ~2408 tok/prompt, 225s
+  - retrieval k=5:   90.0% acc, ~449 tok/prompt,  71s
+  - retrieval k=8:   93.3% acc, ~635 tok/prompt,  95s
+  - takeaway: retrieval BEAT dump-everything (93.3 vs 90) at ~4x fewer tokens and ~2.4x faster.
+    irrelevant tables are noise that distracts the model — removing them helps accuracy AND cost.

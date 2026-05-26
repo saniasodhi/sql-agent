@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from src.db import get_schema, run_query
 from src.few_shot import format_few_shot_block
+from src.schema_tools import full_schema_string
 
 load_dotenv()
 _client = Anthropic()
@@ -93,12 +94,22 @@ def _critique(question, draft_sql, schema, model=DEFAULT_MODEL):
     return cleaned, "revised"
 
 
-def text_to_sql(question, schema=None, model=DEFAULT_MODEL, max_attempts=MAX_ATTEMPTS, verbose=False, use_critic=True):
+def text_to_sql(question, schema=None, retriever=None, top_k=5, model=DEFAULT_MODEL, max_attempts=MAX_ATTEMPTS, verbose=False, use_critic=True):
     """
-    Returns dict with: sql, results, error, attempts, trace, critic_action
+    Returns dict with: sql, results, error, attempts, trace, critic_action, schema_tables
+
+    schema resolution priority:
+      1. if `schema` is passed explicitly, use it
+      2. elif `retriever` is passed, retrieve top_k relevant tables for the question
+      3. else fall back to the default full chinook schema
     """
+    retrieved_tables = None
     if schema is None:
-        schema = get_schema()
+        if retriever is not None:
+            schema = retriever.retrieve_schema_string(question, top_k=top_k)
+            retrieved_tables = retriever.retrieve(question, top_k=top_k)
+        else:
+            schema = get_schema()
 
     system_prompt = SQL_SYSTEM_PROMPT_TEMPLATE.format(
         schema=schema,
@@ -125,6 +136,7 @@ def text_to_sql(question, schema=None, model=DEFAULT_MODEL, max_attempts=MAX_ATT
                 "attempts": attempt,
                 "trace": trace + [{"sql": sql, "error": "unanswerable"}],
                 "critic_action": critic_action,
+                "schema_tables": retrieved_tables,
             }
 
         # 2. critique step (only on first attempt; on retries we already have specific error feedback)
@@ -143,6 +155,7 @@ def text_to_sql(question, schema=None, model=DEFAULT_MODEL, max_attempts=MAX_ATT
                 "attempts": attempt,
                 "trace": trace + [{"sql": sql, "error": None}],
                 "critic_action": critic_action,
+                "schema_tables": retrieved_tables,
             }
         except sqlite3.Error as e:
             err = str(e)
@@ -164,6 +177,7 @@ def text_to_sql(question, schema=None, model=DEFAULT_MODEL, max_attempts=MAX_ATT
         "attempts": max_attempts,
         "trace": trace,
         "critic_action": critic_action,
+        "schema_tables": retrieved_tables,
     }
 
 
@@ -177,6 +191,7 @@ def nl_query(question, **kwargs):
         "attempts": result["attempts"],
         "trace": result["trace"],
         "critic_action": result.get("critic_action"),
+        "schema_tables": result.get("schema_tables"),
     }
 
 

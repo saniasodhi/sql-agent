@@ -50,4 +50,15 @@ imperfect: some decoys sneak in (PaymentMethod for money questions). fine — re
 matters more than precision here. as long as the right tables are in the candidate
 set, the LLM handles the rest.
 
-next (day 17): wire this into the agent, eval retrieval vs dump-everything.
+## day 17: retrieval wired in + the big experiment
+
+result (41-table schema, 11 real + 30 decoys):
+- dump everything: 90.0%, ~2408 tok, 225s
+- retrieval k=5:   90.0%, ~449 tok,  71s
+- retrieval k=8:   93.3%, ~635 tok,  95s
+
+surprise: retrieval k=8 BEAT dump-everything on accuracy, not just tokens. reason:
+the 30 decoy tables are noise. extra irrelevant context distracts the model. cutting
+it helps focus. classic "less but relevant > more but noisy."
+
+decision: retrieval k=8 is the config to ship. wins on accuracy, cost, and latency.

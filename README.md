@@ -47,4 +47,23 @@ haiku for cost/speed; sonnet is at least as correct.
 
 By day 14, I built a text-to-SQL agent with self-correction, evaluated it against a 30-question benchmark with proper execution-accuracy matching, and improved it from 70% to 93% through retry loops, few-shot prompting, and self-critique — then compared models to make a cost-vs-quality decision.
 
+### schema retrieval (RAG)
+
+dumping the full schema doesn't scale past small databases — and it turns out it
+also *hurts accuracy*. i added embedding-based retrieval (sentence-transformers,
+local) that fetches only the relevant tables per question. tested on a 41-table
+schema (11 real chinook + 30 decoys):
+
+| schema strategy        | accuracy | avg schema size | wall time |
+| ---------------------- | -------- | --------------- | --------- |
+| dump all 41 tables     | 90.0%    | ~2408 tokens    | 225s      |
+| retrieve top-5 tables  | 90.0%    | ~449 tokens     | 71s       |
+| retrieve top-8 tables  | 93.3%    | ~635 tokens     | 95s       |
+
+retrieval at top-8 *beat* the full-schema baseline (93.3% vs 90%) while using ~4x
+fewer schema tokens and running ~2.4x faster. irrelevant tables act as noise that
+distracts the model — retrieving only relevant ones improves accuracy and cost at
+the same time. this is the feature that makes the agent viable on real databases
+with hundreds of tables.
+
 See [BASELINE.md](BASELINE.md) for the full progression.
