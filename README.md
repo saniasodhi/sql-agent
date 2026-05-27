@@ -1,3 +1,15 @@
+## demo
+
+run the web app locally:
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # add your anthropic api key
+streamlit run app.py
+```
+
+then open http://localhost:8501. type a question, watch it retrieve tables, write SQL, and return the answer.
+
 ## Progress
 - [x] Day 1: Dev environment
 - [x] Day 2: Project scaffolding
@@ -9,6 +21,8 @@
 - [x] Day 9: Few-shot examples in prompt → 90%
 - [x] Day 10: Expand the golden dataset to 30 questions 
 - [x] Day 13: Comparing Haiku and Sonnet 
+- [x] Day 18: Making the streamlit app
+
 
 ## Example
 
